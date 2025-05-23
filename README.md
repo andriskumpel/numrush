@@ -1,4 +1,4 @@
-# Meu Jogo Three.js Runner
+# NumRush - UFSC
 
 Este é um jogo de corrida infinita desenvolvido com Three.js e Cannon-es.
 
