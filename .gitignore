@@ -1,0 +1,10 @@
+# Ignorar dependências do Node
+node_modules/
+
+# Arquivos de sistema operacional
+.DS_Store
+Thumbs.db
+
+# Arquivos de build (se você usar um bundler no futuro)
+dist/
+build/
