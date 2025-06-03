@@ -6,9 +6,26 @@ import { EffectComposer } from 'https://cdn.jsdelivr.net/npm/three@0.164.1/examp
 import { RenderPass } from 'https://cdn.jsdelivr.net/npm/three@0.164.1/examples/jsm/postprocessing/RenderPass.js';
 import { UnrealBloomPass } from 'https://cdn.jsdelivr.net/npm/three@0.164.1/examples/jsm/postprocessing/UnrealBloomPass.js';
 import { SMAAPass } from 'https://cdn.jsdelivr.net/npm/three@0.164.1/examples/jsm/postprocessing/SMAAPass.js';
+import * as Config from './config.js';
 
 // Add score variable
 let score = 0;
+
+// Health system variables
+let playerHealth = Config.gameplayConfig.initialPlayerHealth;
+const maxPlayerHealth = Config.gameplayConfig.maxPlayerHealth;
+let isInvincible = false;
+let invincibilityTimer = null;
+
+// Obstacle system variables
+let obstacles = [];
+// obstacleSpawnDistance is now Config.collectiblesConfig.obstacleSpawnDistance
+let lastObstaclePosition = -Config.collectiblesConfig.obstacleSpawnDistance;
+let isGameOver = false;
+
+// Game Over Display
+const gameOverDisplay = document.createElement('div');
+
 
 // Initialize loading manager
 const loadingManager = new THREE.LoadingManager();
@@ -56,6 +73,20 @@ if (!canvas) {
     parentDiv.appendChild(canvas);
 }
 
+// Style and append Game Over display
+gameOverDisplay.style.position = 'absolute';
+gameOverDisplay.style.top = '50%';
+gameOverDisplay.style.left = '50%';
+gameOverDisplay.style.transform = 'translate(-50%, -50%)';
+gameOverDisplay.style.color = 'white';
+gameOverDisplay.style.fontSize = '48px';
+gameOverDisplay.style.fontFamily = 'Arial, sans-serif';
+gameOverDisplay.style.textShadow = '3px 3px 6px rgba(0,0,0,0.7)';
+gameOverDisplay.style.display = 'none'; // Initially hidden
+gameOverDisplay.style.textAlign = 'center';
+if (parentDiv) parentDiv.appendChild(gameOverDisplay);
+
+
 // Create loading screen
 const loadingScreen = document.createElement('div');
 loadingScreen.style.position = 'absolute';
@@ -99,25 +130,18 @@ const groundPhysMaterial = new CANNON.Material('ground');
 const clock = new THREE.Clock();
 // Initialize the camera
 const camera = new THREE.PerspectiveCamera(
-    75,
+    Config.cameraConfig.fov,
     canvas.offsetWidth / canvas.offsetHeight,
-    0.1,
-    1000
+    Config.cameraConfig.near,
+    Config.cameraConfig.far
 );
-// Camera configuration
-const cameraConfig = {
-    position: new THREE.Vector3(0, 15, 30),
-    lookAt: new THREE.Vector3(0, 5, -20), // Adjust lookAt to match the new character position
-    fov: 75,
-    near: 0.1,
-    far: 1000
-};
+// Camera configuration (Original local object removed)
 // Set initial camera position and orientation
-camera.position.copy(cameraConfig.position);
-camera.lookAt(cameraConfig.lookAt);
-camera.fov = cameraConfig.fov;
-camera.near = cameraConfig.near;
-camera.far = cameraConfig.far;
+camera.position.set(Config.cameraConfig.position.x, Config.cameraConfig.position.y, Config.cameraConfig.position.z);
+camera.lookAt(new THREE.Vector3(Config.cameraConfig.lookAt.x, Config.cameraConfig.lookAt.y, Config.cameraConfig.lookAt.z));
+camera.fov = Config.cameraConfig.fov; // Already set in constructor, but kept for explicitness
+camera.near = Config.cameraConfig.near; // Already set in constructor
+camera.far = Config.cameraConfig.far;   // Already set in constructor
 camera.updateProjectionMatrix();
 
 // Initialize the renderer with HDR
@@ -181,18 +205,18 @@ controls.dampingFactor = 0.05;
 controls.screenSpacePanning = false;
 controls.minPolarAngle = Math.PI / 6; // 30 degrees
 controls.maxPolarAngle = Math.PI / 2; // 90 degrees
-controls.minDistance = 10;
-controls.maxDistance = 50;
-controls.target = new THREE.Vector3(0, 2, -15); // Adjusted to match cameraConfig.lookAt
+controls.minDistance = 10; // These could be added to config if desired
+controls.maxDistance = 50; // These could be added to config if desired
+controls.target = new THREE.Vector3(Config.cameraConfig.lookAt.x, Config.cameraConfig.lookAt.y, Config.cameraConfig.lookAt.z); // Target the configured lookAt
 
 // Create scrolling terrain with 3 lanes
 const terrainSegments = [];
-const laneWidth = 8; // Doubled the lane width
-const terrainLength = 300; // Increased from 200 to 300
-const numSegments = 4; // Increased from 3 to 4
-const roadWidth = laneWidth * 3; // Total width for 3 lanes (now doubled)
-const grassWidth = 100; // Increased width of grass on each side
-const totalWidth = roadWidth + grassWidth * 2; // Total width including grass
+const laneWidth = Config.terrainConfig.laneWidth;
+const terrainLength = Config.terrainConfig.terrainLength;
+const numSegments = Config.terrainConfig.numSegments;
+const roadWidth = laneWidth * Config.terrainConfig.roadWidthMultiplier;
+const grassWidth = Config.terrainConfig.grassWidth;
+const totalWidth = roadWidth + grassWidth * 2;
 function createRoadTexture() {
     const canvas = document.createElement('canvas');
     canvas.width = 512;
@@ -386,7 +410,7 @@ function addTerrainSegment() {
 }
 
 function updateTerrain(deltaTime) {
-    const scrollSpeed = characterConfig.groundSpeed; // Match the character's speed
+    const scrollSpeed = Config.characterPhysicsConfig.groundSpeed; // Match the character's speed
     const firstSegment = terrainSegments[0];
     const lastSegment = terrainSegments[terrainSegments.length - 1];
     for (let segment of terrainSegments) {
@@ -460,44 +484,19 @@ const keysPressed = {
     ArrowRight: false,
 };
 
-// Character configuration
-const characterConfig = {
-    // Movement settings
-    groundSpeed: 50, // Increased from 30 to 50
-    airSpeed: 40, // Increased from 25 to 40
-    groundDamping: 0.1,
-    airDamping: 0.1,
-    acceleration: 30, // Increased from 20 to 30
-    turnSpeed: 8,
-    jumpForce: 12,
-    jumpCooldown: 0.1,
-    maxJumps: 1,
-
-    // Physics settings
-    radius: 2.5, // Collision shape radius
-    height: 5, // Increased height to match model's visual height
-    mass: 62,
-    friction: 0.1,
-    restitution: 0.0,
-    linearDamping: 0.02,
-    angularDamping: 0.9,
-
-    // Visual and animation settings
-    scale: 10,
-    startHeight: 8,
-};
+// Character configuration (Original local object 'characterConfig' removed)
 
 // Define physics materials for character
-const characterPhysMaterial = new CANNON.Material('character');
+const characterPhysMaterial = new CANNON.Material('character'); // Name 'character' can be kept or configured
 
 // Create contact material between character and ground
 const characterGroundContact = new CANNON.ContactMaterial(
     characterPhysMaterial,
     groundPhysMaterial, {
-        friction: 0.01,
-        restitution: 0.0,
-        contactEquationStiffness: 1e8,
-        contactEquationRelaxation: 3,
+        friction: Config.characterPhysicsConfig.friction,
+        restitution: Config.characterPhysicsConfig.restitution,
+        contactEquationStiffness: 1e8, // Default value, can be configured
+        contactEquationRelaxation: 3,    // Default value, can be configured
     }
 );
 world.addContactMaterial(characterGroundContact);
@@ -526,16 +525,13 @@ const characterUrl = 'https://play.rosebud.ai/assets/3D_playground_character.glb
 gltfLoader.load(characterUrl, (gltf) => {
     const model = gltf.scene;
     model.scale.set(
-        characterConfig.scale,
-        characterConfig.scale,
-        characterConfig.scale
+        Config.characterSetup.scale,
+        Config.characterSetup.scale,
+        Config.characterSetup.scale
     );
 
-    // Apply rotation correction if needed
-    model.rotation.y = Math.PI; // Correcting the model's rotation
-
-    // Adjust model's position so feet are on the ground
-    model.position.set(0, 0, -10); // Move the model 10 units closer to the camera
+    model.rotation.y = Config.characterSetup.modelRotationY;
+    model.position.set(0, Config.characterSetup.modelOffsetY, Config.characterSetup.initialZ);
 
     model.traverse((child) => {
         if (child.isMesh) {
@@ -547,73 +543,66 @@ gltfLoader.load(characterUrl, (gltf) => {
 
     // Create character physics body
     characterBody = new CANNON.Body({
-        mass: characterConfig.mass,
+        mass: Config.characterPhysicsConfig.mass,
         material: characterPhysMaterial,
-        linearDamping: characterConfig.linearDamping,
-        angularDamping: characterConfig.angularDamping,
+        linearDamping: Config.characterPhysicsConfig.linearDamping,
+        angularDamping: Config.characterPhysicsConfig.angularDamping,
         fixedRotation: true,
         type: CANNON.Body.DYNAMIC,
     });
 
     const characterShape = new CANNON.Cylinder(
-        characterConfig.radius,
-        characterConfig.radius,
-        characterConfig.height,
-        8
+        Config.characterPhysicsConfig.radius,
+        Config.characterPhysicsConfig.radius,
+        Config.characterPhysicsConfig.height,
+        8 // Segments for cylinder, can be configured
     );
-    // Adjust shapeOffset to align collision shape with the character model
-    const shapeOffset = new CANNON.Vec3(0, characterConfig.height / 2, 0);
+    const shapeOffset = new CANNON.Vec3(0, Config.characterPhysicsConfig.height / 2, 0); // CANNON.Vec3 for offset
     characterBody.addShape(characterShape, shapeOffset);
-    characterBody.position.set(0, characterConfig.startHeight, -10); // Move the physics body 10 units closer to the camera
+    characterBody.position.set(0, Config.characterSetup.startHeight, Config.characterSetup.initialZ);
     world.addBody(characterBody);
 
     // Reset contact tracking
     isGrounded = false;
-    let groundContactCount = 0;
+    let groundContactCount = 0; // This can likely be removed if not used elsewhere
 
     characterBody.addEventListener('collide', (event) => {
-        const contact = event.contact;
-        // let otherBody; // Not used, can be removed
-        if (event.contact.bi === characterBody) {
-            // otherBody = event.contact.bj; // Not used
-            contact.ni.negate(contactNormal);
-        } else {
-            // otherBody = event.contact.bi; // Not used
-            contactNormal.copy(contact.ni);
-        }
+        // const contact = event.contact; // Keep if needed for other collision logic
+        // // let otherBody; // Not used, can be removed
+        // if (event.contact.bi === characterBody) {
+        //     // otherBody = event.contact.bj; // Not used
+        //     contact.ni.negate(contactNormal); // contactNormal also likely removable
+        // } else {
+        //     // otherBody = event.contact.bi; // Not used
+        //     contactNormal.copy(contact.ni); // contactNormal also likely removable
+        // }
 
-        if (contactNormal.dot(upAxis) > 0.5) {
-            groundContactCount++;
-            isGrounded = true;
-            currentJumps = 0;
+        // if (contactNormal.dot(upAxis) > 0.5) { // upAxis also likely removable
+            // groundContactCount++; // Not needed for raycast grounding
+            // isGrounded = true; // Handled by raycast
+            // currentJumps = 0; // Handled by raycast
 
-            // Reset animations for ground state
-            if (fallAction) {
-                fallAction.stop();
-                fallAction.setEffectiveWeight(0);
+            // Reset animations for ground state - This might still be relevant depending on how animations are triggered
+            // For now, let's assume raycast handles ground state for animation triggers too via isGrounded.
+            // If specific impact-based animation resets are needed, this part could be kept/modified.
+            if (isGrounded) { // Check if raycast confirmed ground
+                 if (fallAction) {
+                    fallAction.stop();
+                    fallAction.setEffectiveWeight(0);
+                }
+                if (jumpAction) {
+                    jumpAction.stop();
+                    jumpAction.setEffectiveWeight(0);
+                }
             }
-            if (jumpAction) {
-                jumpAction.stop();
-                jumpAction.setEffectiveWeight(0);
-            }
-        }
+        // } // End of original contactNormal.dot(upAxis) check
     });
 
-    characterBody.addEventListener('endContact', (event) => { // event.contact is not available on endContact directly
-        // Re-evaluating ground contact more simply:
-        // This part of cannon-es can be tricky. A common approach is to raycast downwards.
-        // For simplicity here, we'll assume if no 'collide' event sets isGrounded, it might become false.
-        // A more robust check would be needed for complex scenarios.
-        // The previous logic for endContact with contactNormal might not be reliable as contact.ni is from the moment of collision.
-        // For now, we'll rely on the 'collide' event to set isGrounded true.
-        // The absence of 'collide' events that satisfy the ground condition will effectively make isGrounded false over time if the character is in the air.
-        // A timeout or a check in the update loop could also manage isGrounded = false.
-        // Let's tentatively set groundContactCount to 0 here, assuming if it's not actively colliding with ground, it's not grounded.
-        // This is a simplification.
-        groundContactCount = 0; // Simplified, might need a more robust solution
-        isGrounded = false; // Assume not grounded unless a 'collide' event says otherwise
-
-    });
+    // Removing 'endContact' listener as raycasting handles continuous ground check
+    // characterBody.addEventListener('endContact', (event) => {
+    //     groundContactCount = 0;
+    //     isGrounded = false;
+    // });
 
     // Setup animations
     mixer = new THREE.AnimationMixer(model);
@@ -653,70 +642,91 @@ gltfLoader.load(characterUrl, (gltf) => {
 });
 
 let currentRotation = 0; // New variable to track current rotation
-const rotationSpeed = 5; // Increased rotation speed for quicker response
-const maxRotation = Math.PI / 8; // Reduced maximum rotation (22.5 degrees)
+// const rotationSpeed = 5; // Now from Config.characterPhysicsConfig.visualRotationSpeed
+// const maxRotation = Math.PI / 8; // Now from Config.characterPhysicsConfig.visualMaxRotation
 // Update character movement
 function updateCharacterMovement(deltaTime) {
-    if (!character || !characterBody) return;
+    if (!character || !characterBody || isGameOver) return; // Added isGameOver check
+
+    // Raycast ground detection
+    const raycasterFeetOffset = 0.1; // Small offset to start ray slightly above very bottom
+    const rayFrom = new CANNON.Vec3(
+        characterBody.position.x,
+        characterBody.position.y - Config.characterPhysicsConfig.height / 2 + raycasterFeetOffset,
+        characterBody.position.z
+    );
+    const rayTo = new CANNON.Vec3(
+        characterBody.position.x,
+        characterBody.position.y - Config.characterPhysicsConfig.height / 2 - 0.2, // Ray extends 0.2 units below cylinder
+        characterBody.position.z
+    );
+    const raycastResult = new CANNON.RaycastResult();
+    world.raycastClosest(rayFrom, rayTo, { collisionFilterMask: -1 }, raycastResult);
+
+    if (raycastResult.hasHit && raycastResult.body !== characterBody) {
+        const groundNormal = raycastResult.hitNormalWorld;
+        const upDirection = new CANNON.Vec3(0, 1, 0); // Assuming world up is Y
+        if (groundNormal.dot(upDirection) > 0.7) { // Check if the surface is flat enough
+            isGrounded = true;
+            currentJumps = 0;
+        } else {
+            isGrounded = false; // Hit a steep slope or non-walkable surface
+        }
+    } else {
+        isGrounded = false; // No hit or hit self
+    }
+
     // Calculate move direction
     moveDirection.set(0, 0, 0);
     // Add movement input (only left and right)
     if (keysPressed.a || keysPressed.ArrowLeft) moveDirection.x = -1;
     if (keysPressed.d || keysPressed.ArrowRight) moveDirection.x = 1;
+
+    const currentVisualMaxRotation = Config.characterPhysicsConfig.visualMaxRotation;
+    const currentVisualRotationSpeed = Config.characterPhysicsConfig.visualRotationSpeed;
+
     // Ground movement
     if (isGrounded) {
-        if (moveDirection.length() > 0) {
-            // Apply full speed instantly
-            characterBody.velocity.x = moveDirection.x * characterConfig.groundSpeed;
-            // Calculate target rotation based on movement direction
-            const targetRotation = moveDirection.x * maxRotation;
-            // Smoothly interpolate current rotation towards target rotation
-            currentRotation = THREE.MathUtils.lerp(currentRotation, targetRotation, deltaTime * rotationSpeed);
+        if (moveDirection.x !== 0) { // Check x component directly
+            characterBody.velocity.x = moveDirection.x * Config.characterPhysicsConfig.groundSpeed;
+            const targetRotation = moveDirection.x * currentVisualMaxRotation;
+            currentRotation = THREE.MathUtils.lerp(currentRotation, targetRotation, deltaTime * currentVisualRotationSpeed);
         } else {
-            // Gradual deceleration when no keys are pressed
-            characterBody.velocity.x *= 0.9; // Adjust this value for desired deceleration
-            // Smoothly return to forward-facing rotation
-            currentRotation = THREE.MathUtils.lerp(currentRotation, 0, deltaTime * rotationSpeed);
+            // Gradual deceleration
+            characterBody.velocity.x *= (1 - Config.characterPhysicsConfig.groundDamping); // Apply damping factor
+            currentRotation = THREE.MathUtils.lerp(currentRotation, 0, deltaTime * currentVisualRotationSpeed);
         }
-        // Apply rotation to character model
-        character.rotation.y = Math.PI + currentRotation; // Add Math.PI to keep the character facing forward
+        character.rotation.y = Config.characterSetup.modelRotationY + currentRotation;
     } else {
-        // Air movement (optional: you can add air control here if desired)
-        characterBody.velocity.x += moveDirection.x * characterConfig.airSpeed * deltaTime;
-        characterBody.velocity.x = THREE.MathUtils.clamp(characterBody.velocity.x, -characterConfig.groundSpeed, characterConfig.groundSpeed);
+        // Air movement
+        characterBody.velocity.x += moveDirection.x * Config.characterPhysicsConfig.airSpeed * Config.characterPhysicsConfig.acceleration * deltaTime;
+        characterBody.velocity.x = THREE.MathUtils.clamp(characterBody.velocity.x, -Config.characterPhysicsConfig.groundSpeed, Config.characterPhysicsConfig.groundSpeed);
+        // Optional: Air rotation
+        const targetRotation = moveDirection.x * currentVisualMaxRotation;
+        currentRotation = THREE.MathUtils.lerp(currentRotation, targetRotation, deltaTime * currentVisualRotationSpeed * 0.5); // Slower air rotation
+        character.rotation.y = Config.characterSetup.modelRotationY + currentRotation;
     }
-    // Clamp character position to stay within the road
-    const minX = -roadWidth / 2 + characterConfig.radius;
-    const maxX = roadWidth / 2 - characterConfig.radius;
+
+    // 3. Clamp Horizontal Position
+    const minX = -roadWidth / 2 + Config.characterPhysicsConfig.radius;
+    const maxX = roadWidth / 2 - Config.characterPhysicsConfig.radius;
     if (characterBody.position.x < minX) {
         characterBody.position.x = minX;
-        characterBody.velocity.x = 0; // Stop horizontal movement at the road boundary
+        characterBody.velocity.x = 0;
     } else if (characterBody.position.x > maxX) {
         characterBody.position.x = maxX;
-        characterBody.velocity.x = 0; // Stop horizontal movement at the road boundary
-    }
-    // Prevent movement onto grass (this logic seems redundant with the clamping above, but keeping it for now)
-    if (Math.abs(characterBody.position.x) > (roadWidth / 2 - characterConfig.radius)) {
-        // Push the character back onto the road
-        const direction = characterBody.position.x > 0 ? -1 : 1; // This should be direction = characterBody.position.x > 0 ? 1 : -1; to correct
-        characterBody.position.x = (roadWidth / 2 - characterConfig.radius) * (characterBody.position.x > 0 ? 1 : -1); // Corrected logic
         characterBody.velocity.x = 0;
     }
-    // Keep the character's z position constant
-    characterBody.position.z = 0;
-    // Set the forward velocity to 0 (the ground will move instead)
-    characterBody.velocity.z = 0;
-    // Apply speed (always using road speed as character can't be on grass)
-    // This seems redundant with the ground movement section.
-    // if (isGrounded && moveDirection.length() > 0) {
-    //     characterBody.velocity.x = moveDirection.x * characterConfig.groundSpeed;
-    // }
 
-    // Handle jumping
-    if (keysPressed.space && isGrounded && currentJumps < characterConfig.maxJumps) {
+    // 4. Manage Z-Position (Character stays fixed, world moves)
+    characterBody.position.z = Config.characterSetup.initialZ;
+    characterBody.velocity.z = 0;
+
+    // 5. Handle Jumping
+    if (keysPressed.space && isGrounded && currentJumps < Config.characterPhysicsConfig.maxJumps) {
         const now = performance.now();
-        if (now - lastJumpTime > characterConfig.jumpCooldown * 1000) {
-            characterBody.velocity.y = characterConfig.jumpForce;
+        if (now - lastJumpTime > Config.characterPhysicsConfig.jumpCooldown * 1000) {
+            characterBody.velocity.y = Config.characterPhysicsConfig.jumpForce;
             currentJumps++;
             lastJumpTime = now;
             isGrounded = false; // Character is no longer grounded after jumping
@@ -726,12 +736,12 @@ function updateCharacterMovement(deltaTime) {
                 jumpAction.setEffectiveWeight(1);
                 jumpAction.play();
             }
-             if (walkAction) walkAction.setEffectiveWeight(0); // Stop walk animation during jump
-             if (idleAction) idleAction.setEffectiveWeight(0); // Stop idle animation during jump
+            if (walkAction) walkAction.setEffectiveWeight(0);
+            if (idleAction) idleAction.setEffectiveWeight(0);
         }
     }
 
-    // Update animations
+    // 6. Update Animations (based on isGrounded, velocity.y)
     if (mixer && idleAction && walkAction && jumpAction && fallAction) {
         const verticalVelocity = characterBody.velocity.y;
         // const horizontalSpeed = new THREE.Vector2(characterBody.velocity.x, characterBody.velocity.z).length(); // Not directly used for animation transitions here
@@ -779,19 +789,19 @@ function updateCharacterMovement(deltaTime) {
 
 // Update camera (now using fixed position)
 function updateCamera() {
-    // Ensure camera is in the fixed position
-    camera.position.copy(cameraConfig.position);
+    // Ensure camera is in the fixed position (already set, but if dynamic changes were allowed, this would re-assert)
+    camera.position.set(Config.cameraConfig.position.x, Config.cameraConfig.position.y, Config.cameraConfig.position.z);
     if (character && characterBody) {
-        // Look at the character's horizontal position, but keep the same y-level as before for lookAt
-        camera.lookAt(new THREE.Vector3(characterBody.position.x, cameraConfig.lookAt.y, characterBody.position.z + cameraConfig.lookAt.z)); // Added characterBody.position.z
+        // Look at a point slightly in front of the character, adjusted by initialZ and lookAt Z offset
+        controls.target.set(characterBody.position.x, Config.cameraConfig.lookAt.y, characterBody.position.z + Config.cameraConfig.lookAt.z - Config.characterSetup.initialZ);
+        camera.lookAt(controls.target);
     } else {
-        camera.lookAt(cameraConfig.lookAt);
+        // Default lookAt if character not loaded
+        const defaultLookAt = new THREE.Vector3(Config.cameraConfig.lookAt.x, Config.cameraConfig.lookAt.y, Config.cameraConfig.lookAt.z);
+        controls.target.copy(defaultLookAt);
+        camera.lookAt(defaultLookAt);
     }
-    // OrbitControls update if needed (though target is now dynamic)
-    if (controls && characterBody) {
-         controls.target.set(characterBody.position.x, cameraConfig.lookAt.y, characterBody.position.z + cameraConfig.lookAt.z);
-         controls.update();
-    }
+    controls.update(); // Update controls in all cases
 }
 
 // =========================
@@ -819,39 +829,45 @@ function animate() {
     requestAnimationFrame(animate);
     const deltaTime = Math.min(clock.getDelta(), 0.1);
     const currentTime = performance.now();
-    if (assetsLoaded) {
+
+    if (assetsLoaded && !isGameOver) { // Check !isGameOver here
         world.step(deltaTime);
         updateCharacterMovement(deltaTime); // Update character movement
-        updateCamera(); // Update camera (now fixed position)
         updateTerrain(deltaTime); // Update scrolling terrain
         updateBeerCollectibles(deltaTime); // Update beer collectibles
         updateBeerOrientation(); // Update beer sprite orientation
+        updateObstacles(deltaTime); // Add call to update obstacles
 
         // Handle Red heart spawning and movement
-        if (!redHeart && currentTime - lastHeartSpawnTime > heartSpawnInterval) {
+        if (!redHeart && currentTime - lastHeartSpawnTime > Config.collectiblesConfig.heartSpawnInterval) {
             createRedHeart();
             lastHeartSpawnTime = currentTime;
         }
         if (redHeart) {
-            redHeart.mesh.position.z += characterConfig.groundSpeed * deltaTime;
+            redHeart.mesh.position.z += Config.characterPhysicsConfig.groundSpeed * deltaTime;
             // Check for collection
             if (!redHeart.collected && character && characterBody) {
-                const characterPosition = new THREE.Vector3(characterBody.position.x, characterBody.position.y + characterConfig.height / 2, characterBody.position.z); // Use center of character
-                const heartPosition = redHeart.mesh.position;
-                const distanceX = Math.abs(characterPosition.x - heartPosition.x);
-                const distanceY = Math.abs(characterPosition.y - heartPosition.y);
-                const distanceZ = Math.abs(characterPosition.z - (heartPosition.z)); // Z is relative to character's fixed Z
+                const charPos = new THREE.Vector3(characterBody.position.x, characterBody.position.y + Config.characterPhysicsConfig.height / 2, characterBody.position.z);
+                const heartPos = redHeart.mesh.position;
+                const distCheckX = Math.abs(charPos.x - heartPos.x);
+                const distCheckY = Math.abs(charPos.y - heartPos.y);
+                const distCheckZ = Math.abs(charPos.z - heartPos.z);
 
-                // Adjust these values based on your character's size and the heart sprite size
-                const collisionThresholdX = characterConfig.radius + 1; // Character radius + half heart width
-                const collisionThresholdY = characterConfig.height / 2 + 1; // Half character height + half heart height
-                const collisionThresholdZ = 2;
-                if (distanceX < collisionThresholdX && distanceY < collisionThresholdY && distanceZ < collisionThresholdZ) {
+                const heartCollisionThresholdX = Config.characterPhysicsConfig.radius + redHeart.mesh.scale.x / 2; // Assuming heart scale is 1 or 2
+                const heartCollisionThresholdY = Config.characterPhysicsConfig.height / 2 + redHeart.mesh.scale.y / 2;
+                const heartCollisionThresholdZ = 2; // Can be configured
+
+                if (distCheckX < heartCollisionThresholdX && distCheckY < heartCollisionThresholdY && distCheckZ < heartCollisionThresholdZ) {
+                    console.log("Red heart collected!");
+                    if (playerHealth < maxPlayerHealth) { // maxPlayerHealth is already from Config
+                        playerHealth += Config.collectiblesConfig.redHeartValue;
+                        if (playerHealth > maxPlayerHealth) playerHealth = maxPlayerHealth; // Cap health
+                    }
+                    updateHealthDisplay();
+                    createRedFlash();
+                    // Original logic to remove heart
                     redHeart.collected = true;
                     scene.remove(redHeart.mesh);
-                    console.log("Red heart collected!");
-                    // Add your collection logic here (e.g., increase health)
-                    createRedFlash();
                     redHeart = null;
                 }
             }
@@ -861,13 +877,20 @@ function animate() {
                 redHeart = null;
             }
         }
-        if (character && characterBody) {
-            // Adjust the character model's position based on the physics body
-            character.position.copy(characterBody.position);
-            character.position.y -= characterConfig.height / 2; // Adjust for cylinder offset
-        }
+    } // End of if (assetsLoaded && !isGameOver)
+
+    // These should still run even if game is over to update camera and character model position
+    if (assetsLoaded) {
+      updateCamera();
+      if (character && characterBody) {
+          // Adjust the character model's position based on the physics body
+          character.position.copy(characterBody.position);
+          character.position.y -= Config.characterPhysicsConfig.height / 2; // Adjust for cylinder offset
+          character.position.y += Config.characterSetup.modelOffsetY; // Apply model specific Y offset
+      }
     }
-    composer.render();
+
+    composer.render(); // Render pass should always happen to show game over screen
 }
 
 // Handle window resize
@@ -876,9 +899,9 @@ function onWindowResize() {
     const height = parentDiv.clientHeight;
     // Update camera
     camera.aspect = width / height;
-    // camera.fov = cameraConfig.fov; // FOV usually doesn't change on resize unless intended
-    // camera.near = cameraConfig.near;
-    // camera.far = cameraConfig.far;
+    // camera.fov = Config.cameraConfig.fov; // FOV usually doesn't change on resize unless intended
+    // camera.near = Config.cameraConfig.near;
+    // camera.far = Config.cameraConfig.far;
     camera.updateProjectionMatrix();
     // Update renderer and composer
     renderer.setSize(width, height);
@@ -907,29 +930,142 @@ if (parentDiv) parentDiv.appendChild(scoreDisplay);
 function updateScoreDisplay() {
     scoreDisplay.textContent = `Score: ${score}`;
 }
-// Initial score display
+
+// Create health display
+const healthDisplay = document.createElement('div');
+healthDisplay.style.position = 'absolute';
+healthDisplay.style.top = '10px';
+healthDisplay.style.right = '10px';
+healthDisplay.style.color = 'white';
+healthDisplay.style.fontSize = '24px';
+healthDisplay.style.fontFamily = 'Arial, sans-serif';
+healthDisplay.style.textShadow = '2px 2px 4px rgba(0,0,0,0.5)';
+if (parentDiv) parentDiv.appendChild(healthDisplay);
+
+// Function to update health display
+function updateHealthDisplay() {
+    healthDisplay.textContent = 'Health: ' + '❤️'.repeat(playerHealth);
+}
+
+// Initial score and health display
 updateScoreDisplay();
+updateHealthDisplay();
+
 // Start animation
 animate();
+
+// Obstacle System
+function createObstacle(zPosition) {
+    const obstacleMaterial = new THREE.SpriteMaterial({ map: rockTexture, transparent: true });
+    const obstacleSprite = new THREE.Sprite(obstacleMaterial);
+    obstacleSprite.scale.set(4, 4, 1); // Adjust scale as needed
+    const laneIndex = Math.floor(Math.random() * 3);
+    obstacleSprite.position.set(lanePositions[laneIndex], obstacleSprite.scale.y / 2, zPosition); // Position on ground
+    scene.add(obstacleSprite);
+    obstacles.push({ mesh: obstacleSprite, collected: false }); // 'collected' means 'hit' here
+}
+
+function updateObstacles(deltaTime) {
+    if (isGameOver) return;
+
+    const scrollSpeed = Config.characterPhysicsConfig.groundSpeed;
+    let i = obstacles.length;
+    while (i--) { // Iterate backwards for safe removal
+        const obstacle = obstacles[i];
+        obstacle.mesh.position.z += scrollSpeed * deltaTime;
+
+        // Remove obstacles that are behind the camera
+        if (obstacle.mesh.position.z > camera.position.z + 20) { // Add some buffer
+            scene.remove(obstacle.mesh);
+            obstacles.splice(i, 1);
+            continue;
+        }
+
+        // Collision Detection
+        if (!obstacle.collected && character && characterBody) {
+            const charPos = new THREE.Vector3(characterBody.position.x, characterBody.position.y + Config.characterPhysicsConfig.height / 2, characterBody.position.z);
+            const obsPos = obstacle.mesh.position;
+            const obsScale = obstacle.mesh.scale;
+
+            const distCheckX = Math.abs(charPos.x - obsPos.x);
+            const distCheckY = Math.abs(charPos.y - obsPos.y);
+            const distCheckZ = Math.abs(charPos.z - obsPos.z);
+
+            const obsCollisionThresholdX = Config.characterPhysicsConfig.radius + obsScale.x / 2 * 0.8; // Leniency factor can be configured
+            const obsCollisionThresholdY = Config.characterPhysicsConfig.height / 2 + obsScale.y / 2 * 0.8;
+            const obsCollisionThresholdZ = 1.5; // Can be configured
+
+            if (distCheckX < obsCollisionThresholdX && distCheckY < obsCollisionThresholdY && distCheckZ < obsCollisionThresholdZ) {
+                console.log("Obstacle hit!");
+                if (isInvincible) return;
+
+                obstacle.collected = true; // Mark as hit
+                scene.remove(obstacle.mesh);
+                obstacles.splice(i, 1); // Remove from array (since iterating backwards, this is safe)
+
+                playerHealth--;
+                updateHealthDisplay();
+                createRedFlash(); // Visual feedback for hit
+
+                if (playerHealth <= 0) {
+                    if (!isGameOver) { // Prevent multiple game over triggers
+                        isGameOver = true;
+                        gameOverDisplay.innerHTML = `Game Over!<br>Score: ${score}<br><small>(Refresh to play again)</small>`;
+                        gameOverDisplay.style.display = 'flex';
+                        console.log("Health depleted. Game Over.");
+                    }
+                    return; // Exit, game is over
+                } else { // Hit, but not game over
+                    isInvincible = true;
+                    if (invincibilityTimer) clearTimeout(invincibilityTimer); // Clear existing timer
+                    invincibilityTimer = setTimeout(() => {
+                        isInvincible = false;
+                        console.log("Invincibility ended");
+                    }, Config.gameplayConfig.invincibilityDuration);
+                }
+                // Do not return here if game is not over, allow other obstacles to be processed if necessary
+                // (though typically one collision per frame is enough to handle)
+                // The splice already adjusted the loop, so 'continue' might be good if we want to ensure only one hit per frame fully processes.
+                // For now, this is fine as player becomes invincible.
+            }
+        }
+    }
+
+    // Spawn new obstacles
+    let furthestObstacleZ = -Infinity;
+    if (obstacles.length > 0) {
+        furthestObstacleZ = obstacles.reduce((minZ, obs) => Math.min(minZ, obs.mesh.position.z), 0);
+    } else {
+        furthestObstacleZ = lastObstaclePosition; // Use the tracked lastObstaclePosition if no obstacles exist
+    }
+
+    if (obstacles.length < 10 && (obstacles.length === 0 || furthestObstacleZ > (lastObstaclePosition + Config.collectiblesConfig.obstacleSpawnDistance))) { // Limit total obstacles on screen (10 can be configured)
+        const newObstacleZ = -Config.collectiblesConfig.obstacleSpawnDistance - Math.random() * Config.collectiblesConfig.obstacleSpawnDistance; // Spawn further ahead
+        createObstacle(newObstacleZ);
+        lastObstaclePosition = newObstacleZ;
+    }
+}
+
 // Beer collectible system
 const beerCollectibles = [];
-const beerSpawnDistance = 50; // Increased from 30 to 50
-const lanePositions = [-laneWidth, 0, laneWidth]; // Ensure laneWidth is defined
-let lastBeerPosition = -beerSpawnDistance; // Initialize to spawn first beer correctly
+// beerSpawnDistance is from Config.collectiblesConfig.beerSpawnDistance
+const lanePositions = [-Config.terrainConfig.laneWidth, 0, Config.terrainConfig.laneWidth];
+let lastBeerPosition = -Config.collectiblesConfig.beerSpawnDistance;
 
 // Red heart variables
 let redHeart = null;
 let lastHeartSpawnTime = 0;
-const heartSpawnInterval = 20000; // Decreased from 30000 to 20000 (20 seconds)
+// heartSpawnInterval is from Config.collectiblesConfig.heartSpawnInterval
 function createRedHeart() {
     const heartMaterial = new THREE.SpriteMaterial({
         map: heartTexture,
         transparent: true
     });
     const heartSprite = new THREE.Sprite(heartMaterial);
-    heartSprite.scale.set(2, 2, 1);
+    heartSprite.scale.set(2, 2, 1); // Scale can be configured
     const randomLaneIndex = Math.floor(Math.random() * lanePositions.length);
-    heartSprite.position.set(lanePositions[randomLaneIndex], 2.5, -50); // Spawn 50 units ahead in a random lane
+    // Spawn consistently ahead, like beers/obstacles. Using beerSpawnDistance as a generic "collectible spawn distance from player"
+    heartSprite.position.set(lanePositions[randomLaneIndex], 2.5, -Config.collectiblesConfig.beerSpawnDistance);
     scene.add(heartSprite);
     redHeart = {
         mesh: heartSprite,
@@ -962,7 +1098,7 @@ function updateBeerOrientation() {
 }
 
 function updateBeerCollectibles(deltaTime) {
-    const scrollSpeed = characterConfig.groundSpeed;
+    const scrollSpeed = Config.characterPhysicsConfig.groundSpeed;
     let i = beerCollectibles.length;
     while (i--) { // Iterate backwards for safe removal
         const beer = beerCollectibles[i];
@@ -977,25 +1113,23 @@ function updateBeerCollectibles(deltaTime) {
 
         // Check for collection with improved collision detection
         if (!beer.collected && character && characterBody) {
-            const characterPosition = new THREE.Vector3(characterBody.position.x, characterBody.position.y + characterConfig.height / 2, characterBody.position.z);
-            const beerPosition = beer.mesh.position;
-            const distanceX = Math.abs(characterPosition.x - beerPosition.x);
-            const distanceY = Math.abs(characterPosition.y - beerPosition.y);
-            const distanceZ = Math.abs(characterPosition.z - (beerPosition.z)); // Z is relative
+            const charPos = new THREE.Vector3(characterBody.position.x, characterBody.position.y + Config.characterPhysicsConfig.height / 2, characterBody.position.z);
+            const beerPos = beer.mesh.position;
+            const distCheckX = Math.abs(charPos.x - beerPos.x);
+            const distCheckY = Math.abs(charPos.y - beerPos.y);
+            const distCheckZ = Math.abs(charPos.z - beerPos.z);
 
-            const collisionThresholdX = characterConfig.radius + 1;
-            const collisionThresholdY = characterConfig.height / 2 + 1;
-            const collisionThresholdZ = 2;
+            const beerCollisionThresholdX = Config.characterPhysicsConfig.radius + beer.mesh.scale.x / 2; // Assuming beer scale 1 or 2
+            const beerCollisionThresholdY = Config.characterPhysicsConfig.height / 2 + beer.mesh.scale.y / 2;
+            const beerCollisionThresholdZ = 2; // Can be configured
 
-            if (distanceX < collisionThresholdX && distanceY < collisionThresholdY && distanceZ < collisionThresholdZ) {
+            if (distCheckX < beerCollisionThresholdX && distCheckY < beerCollisionThresholdY && distCheckZ < beerCollisionThresholdZ) {
                 beer.collected = true;
                 scene.remove(beer.mesh);
                 beerCollectibles.splice(i, 1);
                 console.log("Beer collected!");
-                // Increment score and update display
-                score += 10;
+                score += Config.collectiblesConfig.beerScoreValue;
                 updateScoreDisplay();
-                // No need to continue here, as the item is removed
             }
         }
     }
@@ -1017,23 +1151,21 @@ function updateBeerCollectibles(deltaTime) {
     // if the "most negative Z" beer is now greater (further down the track, towards positive Z)
     // than the point where we last decided to spawn a beer (`lastBeerPosition`) minus the spawn distance.
     // This logic tries to maintain a certain density of beer.
-    if (beerCollectibles.length === 0 || furthestBeerZ > (lastBeerPosition + beerSpawnDistance)) { // Corrected logic for spawning
-        // Spawn the new beer ahead of the character
-        // `lastBeerPosition` should track the Z where the *next* beer should be placed.
-        // When spawning a new beer, it should be at some negative Z value far from the player.
-        // Let's adjust `lastBeerPosition` to be the position of the newly created beer.
-        const newBeerZ = -50 - Math.random() * 50; // Spawn between -50 and -100 units away
+    // Ensure game is not over before spawning new beer
+    if (!isGameOver &&
+        (beerCollectibles.length === 0 || furthestBeerZ > (lastBeerPosition + Config.collectiblesConfig.beerSpawnDistance))) {
+        const newBeerZ = -Config.collectiblesConfig.beerSpawnDistance - Math.random() * Config.collectiblesConfig.beerSpawnDistance; // Spawn further ahead
         createBeerCollectible(newBeerZ);
-        lastBeerPosition = newBeerZ; // Update where the "last" one was spawned for the next check
+        lastBeerPosition = newBeerZ;
     }
 }
 // Function to create red flash effect
 function createRedFlash() {
     // Calculate the size of the plane to cover the entire viewport
-    const distance = camera.near + 0.01; // Place it just in front of the near plane
-    const vFov = camera.fov * Math.PI / 180; // Convert vertical fov to radians
-    const height = 2 * Math.tan(vFov / 2) * distance; // Visible height at flash plane
-    const width = height * camera.aspect; // Visible width at flash plane
+    const distance = Config.cameraConfig.near + 0.01;
+    const vFov = Config.cameraConfig.fov * Math.PI / 180;
+    const height = 2 * Math.tan(vFov / 2) * distance;
+    const width = height * camera.aspect;
     const flashGeometry = new THREE.PlaneGeometry(width, height);
     const flashMaterial = new THREE.MeshBasicMaterial({
         color: 0xff0000,
